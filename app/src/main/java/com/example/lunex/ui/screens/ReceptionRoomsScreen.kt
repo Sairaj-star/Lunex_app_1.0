@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -104,6 +105,7 @@ fun ReceptionRoomsScreen(
     // Dialog states
     var bookingRoomNumber by remember { mutableStateOf<Int?>(null) }
     var issuedKeyData by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    var joinRoomTargetNumber by remember { mutableStateOf<Int?>(null) }
     var showJoinDialog by remember { mutableStateOf(false) }
 
     val ranges = listOf(
@@ -172,7 +174,10 @@ fun ReceptionRoomsScreen(
             }
 
             OutlinedButton(
-                onClick = { showJoinDialog = true },
+                onClick = {
+                    joinRoomTargetNumber = null
+                    showJoinDialog = true
+                },
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = LunexText),
                 border = androidx.compose.foundation.BorderStroke(1.dp, LunexLine),
@@ -294,10 +299,10 @@ fun ReceptionRoomsScreen(
                 FilterChip(
                     selected = selectedStatusFilter == RoomStatus.OCCUPIED,
                     onClick = { selectedStatusFilter = RoomStatus.OCCUPIED },
-                    label = { Text("Occupied", fontSize = 11.sp) },
+                    label = { Text("Occupied (Private)", fontSize = 11.sp) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = LunexMineBorder,
-                        selectedLabelColor = LunexText,
+                        selectedLabelColor = LunexAccent,
                         containerColor = LunexPanel,
                         labelColor = LunexMuted
                     ),
@@ -323,17 +328,12 @@ fun ReceptionRoomsScreen(
                 RoomCardItem(
                     room = room,
                     onClick = {
-                        when (room.status) {
-                            RoomStatus.AVAILABLE -> {
-                                bookingRoomNumber = room.number
-                            }
-                            RoomStatus.OCCUPIED -> {
-                                // Has space to join with key
-                                showJoinDialog = true
-                            }
-                            RoomStatus.FULL -> {
-                                Toast.makeText(context, "Room ${room.number} is full.", Toast.LENGTH_SHORT).show()
-                            }
+                        if (room.status == RoomStatus.AVAILABLE) {
+                            bookingRoomNumber = room.number
+                        } else {
+                            // Room is Private & Occupied — prompt directly to enter key to join!
+                            joinRoomTargetNumber = room.number
+                            showJoinDialog = true
                         }
                     }
                 )
@@ -385,15 +385,20 @@ fun ReceptionRoomsScreen(
         )
     }
 
-    // Join with Key Dialog
+    // Join with Key Dialog (Handles both clicking an occupied room or the top button)
     if (showJoinDialog) {
         JoinRoomDialog(
-            onDismiss = { showJoinDialog = false },
-            onSubmit = { roomNum, key ->
-                val result = repository.joinRoom(roomNum, key)
+            initialRoomNumber = joinRoomTargetNumber,
+            onDismiss = {
+                showJoinDialog = false
+                joinRoomTargetNumber = null
+            },
+            onSubmit = { roomNum, key, nickname ->
+                val result = repository.joinRoom(roomNum, key, nickname)
                 result.fold(
                     onSuccess = { (_, occupant) ->
                         showJoinDialog = false
+                        joinRoomTargetNumber = null
                         onEnterRoom(roomNum, key, occupant)
                     },
                     onFailure = { error ->
@@ -411,20 +416,19 @@ private fun RoomCardItem(
     onClick: () -> Unit
 ) {
     val isAvailable = room.status == RoomStatus.AVAILABLE
-    val isFull = room.status == RoomStatus.FULL
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .clickable(enabled = !isFull, onClick = onClick),
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (isAvailable) LunexPanel else LunexPanelElevated
         ),
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
-            if (isAvailable) LunexLine else LunexLine.copy(alpha = 0.5f)
+            if (isAvailable) LunexLine else LunexMineBorder
         )
     ) {
         Column(
@@ -439,40 +443,47 @@ private fun RoomCardItem(
             ) {
                 Text(
                     text = "Room ${room.number}",
-                    color = if (isFull) LunexMuted else LunexText,
+                    color = LunexText,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(
-                            when (room.status) {
-                                RoomStatus.AVAILABLE -> LunexAvailable
-                                RoomStatus.OCCUPIED -> LunexOccupied
-                                RoomStatus.FULL -> LunexFull
-                            }
-                        )
-                )
+                if (isAvailable) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(LunexAvailable)
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = "Private Room",
+                        tint = LunexAccent,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = when (room.status) {
-                    RoomStatus.AVAILABLE -> "Available"
-                    RoomStatus.FULL -> "Full"
-                    RoomStatus.OCCUPIED -> "${room.occupants.size}/${room.capacity} occupied"
+                text = if (isAvailable) {
+                    "Available"
+                } else {
+                    "Occupied (Private)"
                 },
-                color = when (room.status) {
-                    RoomStatus.AVAILABLE -> LunexAvailable
-                    RoomStatus.FULL -> LunexFull
-                    RoomStatus.OCCUPIED -> LunexOccupied
-                },
+                color = if (isAvailable) LunexAvailable else LunexAccent,
                 fontSize = 11.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.SemiBold
             )
+
+            if (!isAvailable) {
+                Text(
+                    text = if (room.occupants.isNotEmpty()) "${room.occupants.size} inside" else "Key required",
+                    color = LunexMuted,
+                    fontSize = 10.sp
+                )
+            }
         }
     }
 }
@@ -717,7 +728,7 @@ fun KeyIssuedDialog(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
-                    text = "Share this key with the people you want to invite. They only need the key to enter.",
+                    text = "Share this key with the people you want to invite. All users who enter this key can unlock and join the room at any time.",
                     color = LunexMuted,
                     fontSize = 12.sp,
                     lineHeight = 18.sp
@@ -741,11 +752,15 @@ fun KeyIssuedDialog(
 
 @Composable
 fun JoinRoomDialog(
+    initialRoomNumber: Int? = null,
     onDismiss: () -> Unit,
-    onSubmit: (roomNumber: Int, key: String) -> Unit
+    onSubmit: (roomNumber: Int, key: String, nickname: String?) -> Unit
 ) {
-    var roomText by remember { mutableStateOf("") }
+    var roomText by remember(initialRoomNumber) {
+        mutableStateOf(initialRoomNumber?.toString() ?: "")
+    }
     var keyText by remember { mutableStateOf("") }
+    var nicknameText by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
@@ -755,14 +770,14 @@ fun JoinRoomDialog(
         title = {
             Column {
                 Text(
-                    text = "INVITATION",
+                    text = if (initialRoomNumber != null) "ROOM $initialRoomNumber (PRIVATE)" else "INVITATION",
                     color = LunexAccent,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 1.sp
                 )
                 Text(
-                    text = "Enter your room key",
+                    text = if (initialRoomNumber != null) "Unlock Room $initialRoomNumber" else "Enter room key",
                     color = LunexText,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
@@ -774,16 +789,58 @@ fun JoinRoomDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                if (initialRoomNumber == null) {
+                    OutlinedTextField(
+                        value = roomText,
+                        onValueChange = {
+                            roomText = it
+                            errorMessage = null
+                        },
+                        label = { Text("Room number (1-500)") },
+                        placeholder = { Text("Example: 17") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = LunexBg,
+                            unfocusedContainerColor = LunexBg,
+                            focusedBorderColor = LunexAccent,
+                            unfocusedBorderColor = LunexLine,
+                            focusedTextColor = LunexText,
+                            unfocusedTextColor = LunexText
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(LunexBg)
+                            .border(1.dp, LunexMineBorder, RoundedCornerShape(10.dp))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = LunexAccent, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Room #$initialRoomNumber is private and occupied. Enter key to join.",
+                            color = LunexMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
                 OutlinedTextField(
-                    value = roomText,
+                    value = keyText,
                     onValueChange = {
-                        roomText = it
+                        keyText = it.uppercase()
                         errorMessage = null
                     },
-                    label = { Text("Room number (1-500)") },
-                    placeholder = { Text("Example: 17") },
+                    label = { Text("9-character key") },
+                    placeholder = { Text("XXXXXXXXX") },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = LunexBg,
@@ -797,17 +854,11 @@ fun JoinRoomDialog(
                 )
 
                 OutlinedTextField(
-                    value = keyText,
-                    onValueChange = {
-                        if (it.length <= 9) {
-                            keyText = it.uppercase()
-                            errorMessage = null
-                        }
-                    },
-                    label = { Text("9-character key") },
-                    placeholder = { Text("XXXXXXXXX") },
+                    value = nicknameText,
+                    onValueChange = { nicknameText = it },
+                    label = { Text("Your nickname in room (optional)") },
+                    placeholder = { Text("Leave blank for anonymous Guest label") },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = LunexBg,
@@ -833,12 +884,16 @@ fun JoinRoomDialog(
             Button(
                 onClick = {
                     val num = roomText.trim().toIntOrNull()
-                    val key = keyText.trim().uppercase()
-                    if (num == null || num !in 1..500 || key.length != 9) {
-                        errorMessage = "Enter a valid room number (1-500) and 9-character key."
+                    val key = keyText.replace("\\s+".toRegex(), "").trim().uppercase()
+                    if (num == null || num !in 1..500) {
+                        errorMessage = "Please enter a valid room number between 1 and 500."
                         return@Button
                     }
-                    onSubmit(num, key)
+                    if (key.length != 9) {
+                        errorMessage = "The room key must be exactly 9 characters long."
+                        return@Button
+                    }
+                    onSubmit(num, key, nicknameText.trim().takeIf { it.isNotEmpty() })
                 },
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = LunexAccent),

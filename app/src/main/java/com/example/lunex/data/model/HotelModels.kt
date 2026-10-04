@@ -2,8 +2,7 @@ package com.example.lunex.data.model
 
 enum class RoomStatus {
     AVAILABLE,
-    OCCUPIED,
-    FULL
+    OCCUPIED
 }
 
 enum class MessageType {
@@ -58,9 +57,8 @@ data class HotelRoom(
     val audit: List<AuditEntry> = emptyList()
 ) {
     val status: RoomStatus
-        get() = when {
-            !booked -> RoomStatus.AVAILABLE
-            occupants.size >= capacity && capacity > 0 -> RoomStatus.FULL
-            else -> RoomStatus.OCCUPIED
-        }
+        get() = if (booked) RoomStatus.OCCUPIED else RoomStatus.AVAILABLE
+
+    val isPrivate: Boolean
+        get() = booked
 }

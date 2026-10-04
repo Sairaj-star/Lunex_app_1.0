@@ -42,6 +42,10 @@ class HotelRepository private constructor(private val context: Context) {
         return sb.toString()
     }
 
+    private fun sanitizeKey(raw: String?): String {
+        return (raw ?: "").replace("\\s+".toRegex(), "").trim().uppercase()
+    }
+
     private fun loadRooms() {
         val initialMap = mutableMapOf<Int, HotelRoom>()
         for (i in 1..500) {
@@ -230,7 +234,7 @@ class HotelRepository private constructor(private val context: Context) {
         }
         val room = _rooms.value[roomNumber] ?: return Result.failure(IllegalArgumentException("Room not found."))
         if (room.booked) {
-            return Result.failure(IllegalStateException("This room is already booked."))
+            return Result.failure(IllegalStateException("Room #$roomNumber is already private & booked."))
         }
 
         val name = rawName.trim().replace("\\s+".toRegex(), " ")
@@ -243,21 +247,18 @@ class HotelRepository private constructor(private val context: Context) {
             return Result.failure(IllegalArgumentException("Enter a valid 10-digit mobile number."))
         }
 
-        if (capacity !in 1..50) {
-            return Result.failure(IllegalArgumentException("Capacity must be between 1 and 50."))
-        }
-
+        val targetCapacity = capacity.coerceIn(1, 50)
         val key = generateKey()
-        val booking = BookingInfo(name = name, phone = phone, capacity = capacity)
+        val booking = BookingInfo(name = name, phone = phone, capacity = targetCapacity)
         val auditEntry = AuditEntry(
             id = UUID.randomUUID().toString(),
             type = "room_booked",
-            details = "Booked by $name ($phone) for $capacity guests."
+            details = "Booked by $name ($phone) for $targetCapacity guests. Key: $key"
         )
 
         val updatedRoom = room.copy(
             booked = true,
-            capacity = capacity,
+            capacity = targetCapacity,
             key = key,
             booking = booking,
             occupants = emptyList(),
@@ -271,26 +272,38 @@ class HotelRepository private constructor(private val context: Context) {
     }
 
     @Synchronized
-    fun joinRoom(roomNumber: Int, key: String): Result<Pair<HotelRoom, Occupant>> {
+    fun joinRoom(roomNumber: Int, key: String, nickname: String? = null): Result<Pair<HotelRoom, Occupant>> {
         if (roomNumber !in 1..500) {
             return Result.failure(IllegalArgumentException("Invalid room number."))
         }
         val room = _rooms.value[roomNumber] ?: return Result.failure(IllegalArgumentException("Room not found."))
-        if (!room.booked || room.key.isNullOrEmpty() || !room.key.equals(key.trim(), ignoreCase = true)) {
-            return Result.failure(IllegalArgumentException("Invalid room key for Room $roomNumber."))
+
+        val cleanInputKey = sanitizeKey(key)
+        val cleanRoomKey = sanitizeKey(room.key)
+
+        if (!room.booked || cleanRoomKey.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Room #$roomNumber is not currently booked."))
         }
-        if (room.occupants.size >= room.capacity && room.capacity > 0) {
-            return Result.failure(IllegalStateException("This room is currently full."))
+        if (cleanInputKey != cleanRoomKey) {
+            return Result.failure(IllegalArgumentException("Invalid room key for Room #$roomNumber. Please verify the 9-character key."))
         }
 
+        // All users who have the key are granted access.
+        // Automatically expand capacity if needed to welcome invited guests.
+        val newCapacity = maxOf(room.capacity, room.occupants.size + 1)
+
         val occupantId = "guest_" + UUID.randomUUID().toString().take(8)
-        val occupantLabel = "Guest ${room.occupants.size + 1}"
+        val occupantLabel = if (!nickname.isNullOrBlank()) {
+            nickname.trim()
+        } else {
+            "Guest ${room.occupants.size + 1}"
+        }
         val occupant = Occupant(id = occupantId, label = occupantLabel)
 
         val audit = AuditEntry(
             id = UUID.randomUUID().toString(),
             type = "entered",
-            details = "$occupantLabel entered the room."
+            details = "$occupantLabel entered the room using the key."
         )
 
         val systemMsg = ChatMessage(
@@ -303,6 +316,7 @@ class HotelRepository private constructor(private val context: Context) {
         )
 
         val updatedRoom = room.copy(
+            capacity = newCapacity,
             occupants = room.occupants + occupant,
             messages = room.messages + systemMsg,
             audit = room.audit + audit
@@ -452,54 +466,57 @@ class HotelRepository private constructor(private val context: Context) {
     }
 
     @Synchronized
-    fun exitRoom(roomNumber: Int, occupantId: String): Result<Unit> {
+    fun leaveRoomChat(roomNumber: Int, occupantId: String): Result<Unit> {
         val room = _rooms.value[roomNumber] ?: return Result.failure(IllegalArgumentException("Room not found."))
         val leaving = room.occupants.find { it.id == occupantId }
         val remainingOccupants = room.occupants.filter { it.id != occupantId }
 
         val audit = AuditEntry(
             id = UUID.randomUUID().toString(),
-            type = "exited",
-            details = "${leaving?.label ?: "A guest"} exited the room."
+            type = "stepped_out",
+            details = "${leaving?.label ?: "A guest"} stepped out to Reception."
         )
 
-        if (remainingOccupants.isEmpty()) {
-            // All occupants have left — auto clear and reset room to available!
-            val resetRoom = HotelRoom(
-                number = roomNumber,
-                booked = false,
-                booking = null,
-                key = null,
-                capacity = 0,
-                occupants = emptyList(),
-                messages = emptyList(),
-                audit = listOf(
-                    audit,
-                    AuditEntry(
-                        id = UUID.randomUUID().toString(),
-                        type = "room_cleared",
-                        details = "Everyone has left. Room #$roomNumber has been cleared and is now available."
-                    )
+        val sysMsg = ChatMessage(
+            id = "sys_" + UUID.randomUUID().toString().take(8),
+            roomNumber = roomNumber,
+            senderId = null,
+            senderLabel = "Lunex Reception",
+            type = MessageType.SYSTEM,
+            text = "${leaving?.label ?: "A guest"} stepped out of the room."
+        )
+
+        // CRITICAL: Room REMAINS BOOKED, PRIVATE, AND OCCUPIED! Key and messages remain active!
+        val updatedRoom = room.copy(
+            occupants = remainingOccupants,
+            messages = room.messages + sysMsg,
+            audit = room.audit + audit
+        )
+        _rooms.value = _rooms.value + (roomNumber to updatedRoom)
+        saveRooms()
+        return Result.success(Unit)
+    }
+
+    @Synchronized
+    fun checkoutAndCloseRoom(roomNumber: Int): Result<Unit> {
+        val room = _rooms.value[roomNumber] ?: return Result.failure(IllegalArgumentException("Room not found."))
+        val resetRoom = HotelRoom(
+            number = roomNumber,
+            booked = false,
+            booking = null,
+            key = null,
+            capacity = 0,
+            occupants = emptyList(),
+            messages = emptyList(),
+            audit = listOf(
+                AuditEntry(
+                    id = UUID.randomUUID().toString(),
+                    type = "checked_out",
+                    details = "Guest checked out. Room #$roomNumber has been cleared and is now available."
                 )
             )
-            _rooms.value = _rooms.value + (roomNumber to resetRoom)
-        } else {
-            val sysMsg = ChatMessage(
-                id = "sys_" + UUID.randomUUID().toString().take(8),
-                roomNumber = roomNumber,
-                senderId = null,
-                senderLabel = "Lunex Reception",
-                type = MessageType.SYSTEM,
-                text = "${leaving?.label ?: "A guest"} left the chat."
-            )
-            val updatedRoom = room.copy(
-                occupants = remainingOccupants,
-                messages = room.messages + sysMsg,
-                audit = room.audit + audit
-            )
-            _rooms.value = _rooms.value + (roomNumber to updatedRoom)
-        }
-
+        )
+        _rooms.value = _rooms.value + (roomNumber to resetRoom)
         saveRooms()
         return Result.success(Unit)
     }

@@ -277,7 +277,7 @@ fun OwnerDeskScreen(
         val allRooms = roomsMap.values.toList()
         val availableCount = allRooms.count { it.status == RoomStatus.AVAILABLE }
         val occupiedCount = allRooms.count { it.status == RoomStatus.OCCUPIED }
-        val fullCount = allRooms.count { it.status == RoomStatus.FULL }
+        val totalActiveGuests = allRooms.sumOf { it.occupants.size }
         val bookedRooms = allRooms.filter { it.booked }
 
         Column(
@@ -346,13 +346,13 @@ fun OwnerDeskScreen(
                         StatCard(
                             title = "Occupied",
                             count = occupiedCount,
-                            color = LunexOccupied,
+                            color = LunexAccent,
                             modifier = Modifier.weight(1f)
                         )
                         StatCard(
-                            title = "Full",
-                            count = fullCount,
-                            color = LunexFull,
+                            title = "Inside",
+                            count = totalActiveGuests,
+                            color = LunexText,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -527,22 +527,12 @@ private fun OwnerRoomCard(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(999.dp))
-                            .background(
-                                when (room.status) {
-                                    RoomStatus.AVAILABLE -> LunexAvailable.copy(alpha = 0.2f)
-                                    RoomStatus.FULL -> LunexFull.copy(alpha = 0.2f)
-                                    RoomStatus.OCCUPIED -> LunexOccupied.copy(alpha = 0.2f)
-                                }
-                            )
+                            .background(LunexAccent.copy(alpha = 0.2f))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = room.status.name.lowercase(),
-                            color = when (room.status) {
-                                RoomStatus.AVAILABLE -> LunexAvailable
-                                RoomStatus.FULL -> LunexFull
-                                RoomStatus.OCCUPIED -> LunexText
-                            },
+                            text = if (room.booked) "private" else "available",
+                            color = if (room.booked) LunexAccent else LunexAvailable,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )

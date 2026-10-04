@@ -34,14 +34,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddPhotoAlternate
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -49,8 +48,6 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,7 +56,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -68,7 +64,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -105,10 +100,8 @@ import com.example.lunex.ui.theme.LunexMuted
 import com.example.lunex.ui.theme.LunexOtherBorder
 import com.example.lunex.ui.theme.LunexOtherBubble
 import com.example.lunex.ui.theme.LunexPanel
-import com.example.lunex.ui.theme.LunexPanelElevated
 import com.example.lunex.ui.theme.LunexText
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -124,14 +117,13 @@ fun RoomChatScreen(
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
-    val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
     val roomsMap by repository.rooms.collectAsState()
     val currentRoom = roomsMap[roomNumber]
 
     var inputText by remember { mutableStateOf("") }
-    var showExitDialog by remember { mutableStateOf(false) }
+    var showCheckoutDialog by remember { mutableStateOf(false) }
     var showKeyDialog by remember { mutableStateOf(false) }
     var showPeopleSheet by remember { mutableStateOf(false) }
 
@@ -172,8 +164,10 @@ fun RoomChatScreen(
         }
     }
 
+    // Back handling: Stepping out to reception keeps room booked & private
     BackHandler {
-        showExitDialog = true
+        repository.leaveRoomChat(roomNumber, occupant.id)
+        onExit()
     }
 
     // Media Picker launcher
@@ -221,11 +215,27 @@ fun RoomChatScreen(
                 .fillMaxWidth()
                 .background(LunexPanel)
                 .border(1.dp, LunexLine)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = {
+                        repository.leaveRoomChat(roomNumber, occupant.id)
+                        onExit()
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Leave to Reception",
+                        tint = LunexText
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
                 Box(
                     modifier = Modifier
                         .size(10.dp)
@@ -234,14 +244,23 @@ fun RoomChatScreen(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "ROOM $roomNumber",
+                            color = LunexText,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Private",
+                            tint = LunexAccent,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
                     Text(
-                        text = "ROOM $roomNumber",
-                        color = LunexText,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "${occupant.label} (you)",
+                        text = "${occupant.label} · Private Room",
                         color = LunexMuted,
                         fontSize = 11.sp
                     )
@@ -256,56 +275,56 @@ fun RoomChatScreen(
                         .background(Color(0xFF1B1221))
                         .border(1.dp, LunexLine, RoundedCornerShape(999.dp))
                         .clickable { showPeopleSheet = true }
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .padding(horizontal = 9.dp, vertical = 5.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Group,
                             contentDescription = "Occupants",
-                            tint = LunexMuted,
-                            modifier = Modifier.size(14.dp)
+                            tint = LunexAccent,
+                            modifier = Modifier.size(13.dp)
                         )
-                        Spacer(modifier = Modifier.width(5.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "${currentRoom?.occupants?.size ?: 1}/${currentRoom?.capacity ?: 2}",
+                            text = "${currentRoom?.occupants?.size ?: 1} inside",
                             color = LunexText,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(4.dp))
 
                 // Key info
                 IconButton(
                     onClick = { showKeyDialog = true },
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Key,
                         contentDescription = "Room Key Info",
                         tint = LunexAccent,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(4.dp))
 
-                // Exit button
+                // Check-out / Close options
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
                         .background(LunexDangerBg)
                         .border(1.dp, LunexDangerBorder, RoundedCornerShape(10.dp))
-                        .clickable { showExitDialog = true }
-                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                        .clickable { showCheckoutDialog = true }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                         .testTag("exit_room_button")
                 ) {
                     Text(
-                        text = "Exit",
+                        text = "Check-out",
                         color = LunexDangerText,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -592,7 +611,7 @@ fun RoomChatScreen(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Share this 9-character key with invitees so they can join.",
+                        text = "Share this 9-character key with anyone you want to invite. All invited users who enter this key can unlock and join this room.",
                         color = LunexMuted,
                         fontSize = 12.sp
                     )
@@ -638,44 +657,53 @@ fun RoomChatScreen(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
 
-                currentRoom?.occupants?.forEach { occ ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF191020))
-                            .border(1.dp, LunexLine, RoundedCornerShape(12.dp))
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(if (occ.id == occupant.id) LunexAccent else LunexMuted)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
+                val occupantsList = currentRoom?.occupants ?: emptyList()
+                if (occupantsList.isEmpty()) {
+                    Text(
+                        text = "${occupant.label} (you)",
+                        color = LunexText,
+                        fontSize = 14.sp
+                    )
+                } else {
+                    occupantsList.forEach { occ ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF191020))
+                                .border(1.dp, LunexLine, RoundedCornerShape(12.dp))
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(if (occ.id == occupant.id) LunexAccent else LunexMuted)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = occ.label + if (occ.id == occupant.id) " (you)" else "",
+                                    color = LunexText,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                             Text(
-                                text = occ.label + if (occ.id == occupant.id) " (you)" else "",
-                                color = LunexText,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
+                                text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(occ.joinedAt)),
+                                color = LunexMuted,
+                                fontSize = 11.sp
                             )
                         }
-                        Text(
-                            text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(occ.joinedAt)),
-                            color = LunexMuted,
-                            fontSize = 11.sp
-                        )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "Guests are represented by anonymous room labels. Once all occupants leave, the room resets.",
+                    text = "This room is private. Only guests who have the 9-character key can join.",
                     color = LunexMuted,
                     fontSize = 12.sp,
                     lineHeight = 17.sp
@@ -685,47 +713,69 @@ fun RoomChatScreen(
         }
     }
 
-    // Exit Confirmation Dialog
-    if (showExitDialog) {
+    // Check-out or Step-Out Dialog
+    if (showCheckoutDialog) {
         AlertDialog(
-            onDismissRequest = { showExitDialog = false },
+            onDismissRequest = { showCheckoutDialog = false },
             containerColor = LunexPanel,
             shape = RoundedCornerShape(22.dp),
             title = {
                 Text(
-                    text = "Exit Room #$roomNumber?",
+                    text = "Room #$roomNumber Options",
                     color = LunexText,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
             },
             text = {
-                Text(
-                    text = "If you leave, your presence in this room will end. If everyone has left, the room will be cleared and reset to available.",
-                    color = LunexMuted,
-                    fontSize = 13.sp
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Choose whether to step out to the lobby while keeping your private room active, or permanently check out and release the room.",
+                        color = LunexMuted,
+                        fontSize = 13.sp
+                    )
+                }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        showExitDialog = false
-                        repository.exitRoom(roomNumber, occupant.id)
-                        onExit()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = LunexAccent),
-                    shape = RoundedCornerShape(10.dp)
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Exit Room", color = Color.White)
+                    Button(
+                        onClick = {
+                            showCheckoutDialog = false
+                            repository.leaveRoomChat(roomNumber, occupant.id)
+                            onExit()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LunexAccent),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Step out to Reception (Keep Room Active & Private)", color = Color.White, fontSize = 12.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            showCheckoutDialog = false
+                            repository.checkoutAndCloseRoom(roomNumber)
+                            onExit()
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = LunexDangerText),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, LunexDangerBorder),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Check-out & Clear Room (Release to Hotel)", fontSize = 12.sp)
+                    }
                 }
             },
             dismissButton = {
                 OutlinedButton(
-                    onClick = { showExitDialog = false },
+                    onClick = { showCheckoutDialog = false },
                     shape = RoundedCornerShape(10.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, LunexLine)
                 ) {
-                    Text("Stay", color = LunexText)
+                    Text("Stay in Chat", color = LunexText)
                 }
             }
         )
