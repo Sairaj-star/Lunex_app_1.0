@@ -1,0 +1,8 @@
+{
+  "name": "Lunex",
+  "description": "Private chat hotel featuring 500 rooms, exclusive key-based access, guest privacy, real-time messaging, and owner management desk.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
